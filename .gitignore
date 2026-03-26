@@ -1,0 +1,16 @@
+# Python Virtual Environment
+scrapper_venv/
+venv/
+env/
+.venv/
+
+# Pycache
+__pycache__/
+*.py[cod]
+
+# Excel Files (If you want to keep data out of git)
+# satellite_data_full.xlsx
+# satellite_data_partial.xlsx
+
+# Logs
+*.log
