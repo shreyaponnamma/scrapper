@@ -4,6 +4,7 @@ import re
 import requests
 import json
 import time
+import math
 
 # --- SETTINGS ---
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -13,8 +14,25 @@ def extract_numeric(text):
     if pd.isna(text): return None
     # Remove commas and handle strings
     text_str = str(text).replace(',', '')
+    # Check for range pattern first (e.g. 50-100) -> take the average or the first? 
+    # Usually first is better for "at nadir"
     match = re.search(r'(\d+(?:\.\d+)?)', text_str)
     return float(match.group(1)) if match else None
+
+def extract_swath_dims(text):
+    if pd.isna(text): return None, None
+    text_str = str(text).lower().replace(',', '')
+    
+    # Look for '7.3x3.1' or '25 x 30'
+    match = re.search(r'(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?)', text_str)
+    if match:
+        width = float(match.group(1))
+        length = float(match.group(2))
+        return width, length
+    
+    # If no 'x' just extract the single width
+    width = extract_numeric(text)
+    return width, None
 
 def get_sensor_categories(name, description, op_mode=""):
     name_str = str(name).upper()
@@ -45,6 +63,17 @@ def get_sensor_categories(name, description, op_mode=""):
         'ETM+': ('Passive', 'EO/IR', 'MSI', 'Whisk-Broom'),
         'OLI': ('Passive', 'EO/IR', 'MSI', 'Pushbroom'),
         'TIRS': ('Passive', 'EO/IR', 'MSI', 'Pushbroom'),
+        'HiRI': ('Passive', 'EO/IR', 'PAN', 'Pushbroom'),
+        'HRV': ('Passive', 'EO/IR', 'PAN', 'Pushbroom'),
+        'HRVIR': ('Passive', 'EO/IR', 'PAN', 'Pushbroom'),
+        'NAOMI': ('Passive', 'EO/IR', 'PAN', 'Pushbroom'),
+        'SEVIRI': ('Passive', 'EO/IR', 'MSI', 'Whisk-Broom'),
+        'FCI': ('Passive', 'EO/IR', 'MSI', 'Whisk-Broom'),
+        'ABI': ('Passive', 'EO/IR', 'MSI', 'Whisk-Broom'),
+        'AHI': ('Passive', 'EO/IR', 'MSI', 'Whisk-Broom'),
+        'S-SAR': ('Active', 'Radio', 'SAR', 'Stripmap'),
+        'TSX': ('Active', 'Radio', 'SAR', 'Spotlight'),
+        'TDX': ('Active', 'Radio', 'SAR', 'Spotlight'),
     }
     
     for key, vals in FAMOUS.items():
@@ -91,14 +120,18 @@ def get_sensor_categories(name, description, op_mode=""):
     final_tech = "Unknown"
     if 'spotlight' in text_lower: final_tech = "Spotlight"
     elif 'stripmap' in text_lower: final_tech = "Stripmap"
-    elif 'scansar' in text_lower: final_tech = "ScanSAR"
+    elif 'scansar' in text_lower or 'scan-sar' in text_lower: final_tech = "ScanSAR"
     elif 'pushbroom' in text_lower or 'push-broom' in text_lower: final_tech = "Pushbroom"
     elif 'whisk-broom' in text_lower or 'whiskbroom' in text_lower or 'whisk ' in text_lower: final_tech = "Whisk-Broom"
+    elif 'scanner' in text_lower or 'scanning' in text_lower: final_tech = "Whisk-Broom" # Default for old scanners
+    elif 'limb' in text_lower: final_tech = "Limb"
+    elif 'nadir' in text_lower and final_cls == "Radio": final_tech = "Mono"
     elif 'receiver' in text_lower or 'ais' in text_lower: final_tech = "Receiver"
-    elif 'frame' in text_lower: final_tech = "Frame"
+    elif 'frame' in text_lower or 'matrix' in text_lower: final_tech = "Frame"
     elif final_mode == "MSI": final_tech = "Pushbroom"
-    elif final_mode == "HSI": final_tech = "Pushbroom" # Default for HSI
+    elif final_mode == "HSI": final_tech = "Pushbroom"
     elif final_mode == "SAR": final_tech = "Stripmap"
+    elif final_mode == "PAN": final_tech = "Pushbroom"
 
     # 2. LLM FALLBACK
     if (final_mode == "Unknown" or final_tech == "Unknown") and not (desc_str == 'nan' or desc_str == ''):
@@ -189,6 +222,23 @@ def extract_spectral_range(row):
         
     return None
 
+def calculate_for_deg(for_text, alt_km):
+    if pd.isna(for_text) or pd.isna(alt_km) or alt_km == 0:
+        return None
+    
+    # Extract numeric distance in km
+    match = re.search(r'(\d+(?:\.\d+)?)', str(for_text))
+    if not match:
+        return None
+    
+    dist_km = float(match.group(1))
+    try:
+        # Simple trig calculation
+        angle_rad = math.atan(dist_km / alt_km)
+        return round(math.degrees(angle_rad), 1)
+    except:
+        return None
+
 def transform_to_smu(source_file, target_template, output_file):
     print(f"Transforming {source_file} to SMU format...")
     df = pd.read_excel(source_file)
@@ -228,14 +278,60 @@ def transform_to_smu(source_file, target_template, output_file):
         'Inst_Full_Name': 'SensorName',
         'Sat_Altitude': 'Altitude_km',
         'Swath': 'SwathWidth_km_text',
-        'Inst_Resolution': 'SpatialResClass'
+        'Inst_Resolution': 'SpatialResClass',
+        'Char_Comment': 'Comment',
+        'Char_Incidence_angle': 'IncidenceAngle_deg',
+        'Char_Absolute_accuracy': 'AbsoluteAccuracy'
     }
     
     df_smu = df.rename(columns=mapping)
     
     # 5. Technical Field Normalization
     df_smu['Altitude_km'] = df_smu['Altitude_km'].apply(extract_numeric)
-    df_smu['SwathWidth_km'] = df_smu['SwathWidth_km_text'].apply(extract_numeric)
+    
+    # 5b. Advanced Technical Extractions
+    print("Extracting Advanced Technical Metrics (SNR, NEDT, Polarization)...")
+    
+    # SNR aggregation
+    snr_cols = [c for c in df.columns if 'SNR' in c]
+    if snr_cols:
+        df_smu['SNR'] = df[snr_cols].bfill(axis=1).iloc[:, 0] if not df[snr_cols].empty else np.nan
+    
+    # NEDT aggregation
+    nedt_cols = [c for c in df.columns if 'NEΔT' in c or 'NEDT' in c]
+    if nedt_cols:
+        df_smu['NEDT'] = df[nedt_cols].bfill(axis=1).iloc[:, 0] if not df[nedt_cols].empty else np.nan
+
+    # Polarization extraction
+    pol_cols = ['Char_Polarisations', 'Char_Polarisation', 'Char_Polarisation_axes', 'Char_Polarisation_channels']
+    existing_pol = [c for c in pol_cols if c in df.columns]
+    if existing_pol:
+        df_smu['Polarization'] = df[existing_pol].bfill(axis=1).iloc[:, 0] if not df[existing_pol].empty else np.nan
+
+    # Normalize numeric fields
+    df_smu['IncidenceAngle_deg'] = df_smu['IncidenceAngle_deg'].apply(extract_numeric)
+    
+    # 5c. Field of Regard (FoR) & Taskable Logic
+    print("Calculating Field of Regard and Taskability...")
+    # Prioritize 'Char_Field_of_regard', then 'Char_Field-of-Regard'
+    df['raw_for'] = df['Char_Field_of_regard'].combine_first(df.get('Char_Field-of-Regard', pd.Series(dtype=str)))
+    
+    df_smu['FoRAcrossTrackLeft_deg'] = df.apply(lambda r: calculate_for_deg(r['raw_for'], extract_numeric(r['Sat_Altitude'])), axis=1)
+    df_smu['FoRAcrossTrackRight_deg'] = df_smu['FoRAcrossTrackLeft_deg']
+    
+    df_smu['Taskable'] = df_smu['FoRAcrossTrackLeft_deg'].notna()
+    
+    print("Extracting detailed Swath Dimensions (Width x Length)...")
+    # Combine Swath columns for search
+    raw_swath = df['Char_Swath'].combine_first(df.get('Swath', pd.Series(dtype=str)))
+    
+    swath_results = raw_swath.apply(extract_swath_dims)
+    df_smu['SwathWidth_km'] = swath_results.apply(lambda x: x[0] if x else None)
+    df_smu['SwathLength_km'] = swath_results.apply(lambda x: x[1] if x else None)
+    
+    # Fallback to SwathWidth_km_text if still empty
+    df_smu['SwathWidth_km'] = df_smu['SwathWidth_km'].combine_first(df_smu['SwathWidth_km_text'].apply(extract_numeric))
+    
     df_smu['SpatialResAcross_m'] = df_smu['SpatialResClass'].apply(extract_numeric)
     
     # Constellation Logic
@@ -243,7 +339,7 @@ def transform_to_smu(source_file, target_template, output_file):
         df_smu['ConstellationName'] = df_smu['SatelliteName'].apply(lambda x: str(x).split('-')[0].split(' ')[0] if pd.notna(x) else np.nan)
 
     # 6. Template Alignment
-    template_cols = ['SatelliteName', 'IntDesignator', 'SatelliteCatalogNumber', 'ProviderName', 'ConstellationName', 'ClusterName', 'SubsetName', 'SensorName', 'SensorCategory', 'SensorClass', 'SensorMode', 'SensorModeTechnique', 'Bands', 'SpectralRange', 'Altitude_km', 'SpatialResAcross_m', 'SpatialResAlong_m', 'SpatialResClass', 'SwathWidth_km', 'SwathLength_km', 'FoRAcrossTrackLeft_deg', 'FoRAcrossTrackRight_deg', 'FoRAlongTrackFront_deg', 'FoRAlongTrackBack_deg', 'Comment', 'Taskable']
+    template_cols = ['SatelliteName', 'IntDesignator', 'SatelliteCatalogNumber', 'ProviderName', 'ConstellationName', 'ClusterName', 'SubsetName', 'SensorName', 'SensorCategory', 'SensorClass', 'SensorMode', 'SensorModeTechnique', 'Bands', 'SpectralRange', 'Altitude_km', 'SpatialResAcross_m', 'SpatialResAlong_m', 'SpatialResClass', 'SwathWidth_km', 'SwathLength_km', 'FoRAcrossTrackLeft_deg', 'FoRAcrossTrackRight_deg', 'FoRAlongTrackFront_deg', 'FoRAlongTrackBack_deg', 'SNR', 'NEDT', 'IncidenceAngle_deg', 'Polarization', 'AbsoluteAccuracy', 'Comment', 'Taskable']
     
     for col in template_cols:
         if col not in df_smu.columns:
