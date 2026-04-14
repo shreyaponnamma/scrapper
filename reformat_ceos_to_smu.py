@@ -404,6 +404,7 @@ def reformat_ceos_to_smu(input_path, output_path):
             sensor_name = str(row.get('Instrument Full Name', 'N/A'))
             sensor_name = re.sub(r'\s+Instrument$', '', sensor_name, flags=re.I)
             
+            # Define the SMU row structure
             smu_row = {
                 'SatelliteName': sat_name,
                 'IntDesignator': row.get('International Designator', np.nan),
@@ -413,10 +414,10 @@ def reformat_ceos_to_smu(input_path, output_path):
                 'ClusterName': np.nan,
                 'SubsetName': np.nan,
                 'SensorName': sensor_name,
-                'SensorCategory': cat,
-                'SensorClass': s_class,
-                'SensorMode': final_mode,
-                'SensorModeTechnique': tech,
+                'SensorCategory': cat if sensor_name != 'None Listed' else np.nan,
+                'SensorClass': s_class if sensor_name != 'None Listed' else np.nan,
+                'SensorMode': final_mode if sensor_name != 'None Listed' else np.nan,
+                'SensorModeTechnique': tech if sensor_name != 'None Listed' else np.nan,
                 'Bands': bands, 
                 'SpectralRange': spectral_range,
                 'Altitude_km': altitude,
