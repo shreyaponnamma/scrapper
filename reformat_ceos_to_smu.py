@@ -400,6 +400,10 @@ def reformat_ceos_to_smu(input_path, output_path):
             sat_name = str(row.get('Satellite Full Name', 'N/A'))
             sat_name = re.sub(r'\s+Mission$', '', sat_name, flags=re.I)
             
+            # Apply Sensor Name Cleaning (Remove " Instrument" suffix)
+            sensor_name = str(row.get('Instrument Full Name', 'N/A'))
+            sensor_name = re.sub(r'\s+Instrument$', '', sensor_name, flags=re.I)
+            
             smu_row = {
                 'SatelliteName': sat_name,
                 'IntDesignator': row.get('International Designator', np.nan),
@@ -408,7 +412,7 @@ def reformat_ceos_to_smu(input_path, output_path):
                 'ConstellationName': np.nan, 
                 'ClusterName': np.nan,
                 'SubsetName': np.nan,
-                'SensorName': row.get('Instrument Full Name', 'N/A'),
+                'SensorName': sensor_name,
                 'SensorCategory': cat,
                 'SensorClass': s_class,
                 'SensorMode': final_mode,
