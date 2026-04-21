@@ -149,4 +149,5 @@ def run_benchmark(original_file, generated_file):
         print("-" * 30)
 
 if __name__ == "__main__":
-    run_benchmark('2026-02-24_Multi-SMU_database.xlsx', 'final_SMU_database.xlsx')
+    # Point to the newly enriched file
+    run_benchmark('2026-02-24_Multi-SMU_database.xlsx', 'ceos_enriched_llm_full.xlsx')
