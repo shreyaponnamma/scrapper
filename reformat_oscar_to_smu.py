@@ -15,9 +15,51 @@ def get_first_valid(row, cols):
     """Pick the first non-null value from a list of columns."""
     for c in cols:
         val = row.get(c)
-        if pd.notna(val) and str(val).strip().lower() not in ['nan', 'tbd', 'unknown', 'n/a']:
+        if pd.notna(val) and str(val).strip().lower() not in ['nan', 'tbd', 'unknown', 'n/a', 'none listed']:
             return val
     return np.nan
+
+def infer_oscar_sensor_info(row):
+    """
+    Infers SensorCategory, SensorClass, and SensorModeTechnique 
+    based on the instrument name and description.
+    """
+    name = str(row.get('Inst_Acronym', '')).upper()
+    full_name = str(row.get('Inst_Full_Name', '')).lower()
+    scanning = str(row.get('Inst_Scanning', '')).lower()
+    desc = str(row.get('Inst_Description', '')).lower()
+    
+    category = "Passive"
+    sensor_class = "Optical"
+    technique = "Imager"
+    
+    # Text block for keyword matching
+    text = f"{name} {full_name} {scanning} {desc}"
+    
+    if any(k in text for k in ['sar', 'radar', 'altimeter', 'scatterometer', 'active', 'microwave', 'palsar', 'ais', 'ro ', 'gnss']):
+        category = "Active" if not any(x in text for x in ['ais', 'ro ', 'gnss']) else "Passive"
+        sensor_class = "Radio"
+        if any(x in text for x in ['radar', 'sar', 'palsar']):
+            technique = "SAR"
+    elif any(k in text for k in ['lidar', 'laser', 'icesat']):
+        category = "Active"
+        sensor_class = "Lidar"
+    elif any(k in text for k in ['hyperspectral', 'spectrometer', 'sounding', 'spectral', 'cris', 'iasi', 'airs']):
+        sensor_class = "Spectrometer"
+        technique = "Sounder" if 'sound' in text else "Pushbroom"
+    elif any(k in text for k in ['microwave radiator', 'mhs', 'amsub', 'atms', 'radiometer']):
+        if sensor_class != "Radio": # Don't overwrite Active Radio
+            sensor_class = "Microwave Radiometer"
+            technique = "Sounder"
+            
+    # Refine Technique from scanning column
+    if 'interferometer' in text: technique = "Interferometer"
+    elif 'whiskbroom' in text: technique = "Whiskbroom"
+    elif 'pushbroom' in text: technique = "Pushbroom"
+    elif 'conical' in text: technique = "Conical Scanner"
+    elif 'cross-track' in text: technique = "Cross-track Scanner"
+    
+    return category, sensor_class, technique
 
 def clean_oscar_bands(row):
     """Search multiple columns for band/channel counts."""
@@ -61,6 +103,13 @@ def reformat_oscar_to_smu(input_path, output_path):
         # Swath
         swath = clean_oscar_swath(row)
 
+        # Mode
+        mode = get_first_valid(row, ['Char_Operation_mode', 'Char_Mode', 'Char_Spectral_Mode'])
+        if pd.isna(mode): mode = "Standard"
+
+        # High-level info
+        cat, s_class, tech = infer_oscar_sensor_info(row)
+
         # Resolution (OSCAR often lists this in km for low-res, m for high-res)
         res_raw = get_first_valid(row, ['Inst_Resolution', 'Char_Resolution', 'Char_Spatial_Resolution', 'Char_Resolution_(m)', 'Char_Resolution_(km)'])
         res = np.nan
@@ -86,10 +135,10 @@ def reformat_oscar_to_smu(input_path, output_path):
             'ClusterName': np.nan,
             'SubsetName': np.nan,
             'SensorName': inst_name,
-            'SensorCategory': np.nan,
-            'SensorClass': np.nan,
-            'SensorMode': 'Standard',
-            'SensorModeTechnique': np.nan,
+            'SensorCategory': cat,
+            'SensorClass': s_class,
+            'SensorMode': mode,
+            'SensorModeTechnique': tech,
             'Bands': bands,
             'SpectralRange': spec_range,
             'Altitude_km': alt,
