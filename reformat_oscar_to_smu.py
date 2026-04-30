@@ -62,31 +62,71 @@ def reformat_oscar_to_smu(input_path, output_path):
         swath = clean_oscar_swath(row)
 
         # Resolution (OSCAR often lists this in km for low-res, m for high-res)
-        res_raw = get_first_valid(row, ['Inst_Resolution', 'Char_Resolution', 'Char_Spatial_Resolution'])
+        res_raw = get_first_valid(row, ['Inst_Resolution', 'Char_Resolution', 'Char_Spatial_Resolution', 'Char_Resolution_(m)', 'Char_Resolution_(km)'])
         res = np.nan
         if pd.notna(res_raw):
             match = re.search(r'(\d+(?:\.\d+)?)', str(res_raw))
             if match:
                 res = float(match.group(1))
-                if 'km' in str(res_raw).lower() or res < 5: # If < 5 and not specified, usually km (e.g. 1.1km)
+                if 'km' in str(res_raw).lower() or (res < 50 and 'm' not in str(res_raw).lower()): 
                     res *= 1000 # Convert to meters
         
+        # Spectral Range
+        spec_raw = get_first_valid(row, ['Char_Spectral_Range', 'Char_Spectral_range', 'Char_Spectral_interval'])
+        spec_range = np.nan
+        if pd.notna(spec_raw):
+            spec_range = str(spec_raw)
+
         smu_row = {
             'SatelliteName': sat_name,
+            'IntDesignator': row.get('International Designator', np.nan),
+            'SatelliteCatalogNumber': row.get('NORAD Catalog #', np.nan),
             'ProviderName': agency,
+            'ConstellationName': np.nan,
+            'ClusterName': np.nan,
+            'SubsetName': np.nan,
             'SensorName': inst_name,
-            'Altitude_km': alt,
+            'SensorCategory': np.nan,
+            'SensorClass': np.nan,
+            'SensorMode': 'Standard',
+            'SensorModeTechnique': np.nan,
             'Bands': bands,
-            'SwathWidth_km': swath,
+            'SpectralRange': spec_range,
+            'Altitude_km': alt,
             'SpatialResAcross_m': res,
-            'Taskable': 'Y' if 'operational' in status.lower() else 'N',
-            'Source': 'OSCAR'
+            'SpatialResAlong_m': res,
+            'SpatialResClass': np.nan,
+            'SwathWidth_km': swath,
+            'SwathLength_km': np.nan,
+            'FoRAcrossTrackLeft_deg': np.nan,
+            'FoRAcrossTrackRight_deg': np.nan,
+            'FoRAlongTrackFront_deg': np.nan,
+            'FoRAlongTrackBack_deg': np.nan,
+            'Comment': f"OSCAR Full Name: {row.get('Inst_Full_Name', '')}",
+            'Taskable': 'Y' if 'operational' in status.lower() else 'N'
         }
         smu_records.append(smu_row)
         
     oscar_smu = pd.DataFrame(smu_records)
+    
+    # Ensure all 26 columns are present and in order
+    template_cols = [
+        'SatelliteName', 'IntDesignator', 'SatelliteCatalogNumber', 'ProviderName', 
+        'ConstellationName', 'ClusterName', 'SubsetName', 'SensorName', 
+        'SensorCategory', 'SensorClass', 'SensorMode', 'SensorModeTechnique', 
+        'Bands', 'SpectralRange', 'Altitude_km', 'SpatialResAcross_m', 
+        'SpatialResAlong_m', 'SpatialResClass', 'SwathWidth_km', 'SwathLength_km', 
+        'FoRAcrossTrackLeft_deg', 'FoRAcrossTrackRight_deg', 'FoRAlongTrackFront_deg', 
+        'FoRAlongTrackBack_deg', 'Comment', 'Taskable'
+    ]
+    
+    for col in template_cols:
+        if col not in oscar_smu.columns:
+            oscar_smu[col] = np.nan
+            
+    oscar_smu = oscar_smu[template_cols]
     oscar_smu.to_excel(output_path, index=False)
-    print(f"Success! Comprehensive OSCAR reformatted and saved to {output_path}")
+    print(f"Success! Comprehensive OSCAR reformatted with 26 columns and saved to {output_path}")
 
 if __name__ == "__main__":
     reformat_oscar_to_smu('oscar_satellite_data_full_perfection.xlsx', 'oscar_reformatted_to_smu.xlsx')
