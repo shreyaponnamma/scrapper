@@ -77,10 +77,17 @@ def clean_oscar_swath(row):
     match = re.search(r'(\d+(?:\.\d+)?)', str(val))
     if match:
         num = float(match.group(1))
-        # Heuristic: if value > 1000 and column doesn't specify km, it might be meters
+        # Heuristic: if value > 3000 and column doesn't specify km, it might be meters
         if num > 3000: return num / 1000.0 # Convert meters to km
         return num
     return np.nan
+
+def extract_for_val(row):
+    """Try to extract Field of Regard values."""
+    val = get_first_valid(row, ['Char_Field-of-Regard', 'Char_Field_of_regard', 'Char_Beamwidth_(deg)'])
+    if pd.isna(val): return np.nan
+    match = re.search(r'(\d+(?:\.\d+)?)', str(val))
+    return float(match.group(1)) if match else np.nan
 
 def reformat_oscar_to_smu(input_path, output_path):
     print(f"Reading {input_path}...")
@@ -110,7 +117,7 @@ def reformat_oscar_to_smu(input_path, output_path):
         # High-level info
         cat, s_class, tech = infer_oscar_sensor_info(row)
 
-        # Resolution (OSCAR often lists this in km for low-res, m for high-res)
+        # Resolution
         res_raw = get_first_valid(row, ['Inst_Resolution', 'Char_Resolution', 'Char_Spatial_Resolution', 'Char_Resolution_(m)', 'Char_Resolution_(km)'])
         res = np.nan
         if pd.notna(res_raw):
@@ -120,11 +127,17 @@ def reformat_oscar_to_smu(input_path, output_path):
                 if 'km' in str(res_raw).lower() or (res < 50 and 'm' not in str(res_raw).lower()): 
                     res *= 1000 # Convert to meters
         
+        res_class = np.nan
+
+        # Field of Regard
+        for_val = extract_for_val(row)
+        for_l = for_r = np.nan
+        if pd.notna(for_val) and (for_val < 50 or "deg" in str(get_first_valid(row, ['Char_Field-of-Regard', 'Char_Field_of_regard', 'Char_Beamwidth_(deg)'])).lower()):
+            for_l = for_r = for_val
+
         # Spectral Range
         spec_raw = get_first_valid(row, ['Char_Spectral_Range', 'Char_Spectral_range', 'Char_Spectral_interval'])
-        spec_range = np.nan
-        if pd.notna(spec_raw):
-            spec_range = str(spec_raw)
+        spec_range = str(spec_raw) if pd.notna(spec_raw) else np.nan
 
         smu_row = {
             'SatelliteName': sat_name,
@@ -147,8 +160,8 @@ def reformat_oscar_to_smu(input_path, output_path):
             'SpatialResClass': np.nan,
             'SwathWidth_km': swath,
             'SwathLength_km': np.nan,
-            'FoRAcrossTrackLeft_deg': np.nan,
-            'FoRAcrossTrackRight_deg': np.nan,
+            'FoRAcrossTrackLeft_deg': for_l,
+            'FoRAcrossTrackRight_deg': for_r,
             'FoRAlongTrackFront_deg': np.nan,
             'FoRAlongTrackBack_deg': np.nan,
             'Comment': f"OSCAR Full Name: {row.get('Inst_Full_Name', '')}",
