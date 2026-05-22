@@ -72,7 +72,8 @@ async def get_mission_details(browser, mission_url):
         await page.goto(mission_url, wait_until="networkidle", timeout=60000)
         details = {}
         h3 = await page.query_selector('h3')
-        details['Satellite Full Name'] = (await h3.inner_text()).strip() if h3 else "Unknown"
+        full_name = (await h3.inner_text()).strip() if h3 else "Unknown"
+        details['Satellite Full Name'] = re.sub(r'\s+Mission$', '', full_name, flags=re.I)
         details['Mission Agencies'] = await extract_field_value(page, 'Mission Agencies')
         details['Mission Status'] = await extract_field_value(page, 'Mission Status')
         details['Launch Date'] = await extract_field_value(page, 'Launch Date')
@@ -101,7 +102,8 @@ async def get_instrument_details(browser, instrument_url):
         await page.goto(instrument_url, wait_until="networkidle", timeout=60000)
         details = {}
         h3 = await page.query_selector('h3')
-        details['Instrument Full Name'] = (await h3.inner_text()).strip() if h3 else "Unknown"
+        inst_name = (await h3.inner_text()).strip() if h3 else "Unknown"
+        details['Instrument Full Name'] = re.sub(r'\s+Instrument$', '', inst_name, flags=re.I)
         details['Resolution'] = await extract_field_value(page, 'Resolution')
         details['Swath'] = await extract_field_value(page, 'Swath')
         details['Accuracy'] = await extract_field_value(page, 'Accuracy')
@@ -131,7 +133,9 @@ async def main():
                     if inst_details:
                         row = details.copy(); row.update(inst_details); all_data.append(row)
             if (i + 1) % 20 == 0:
+                os.makedirs("../raw_data", exist_ok=True)
                 pd.DataFrame(all_data).to_excel("../raw_data/satellite_data_full.xlsx", index=False)
+        os.makedirs("../raw_data", exist_ok=True)
         pd.DataFrame(all_data).to_excel("../raw_data/satellite_data_full.xlsx", index=False)
         await browser.close()
 
