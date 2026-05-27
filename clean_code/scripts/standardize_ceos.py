@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import re
 import os
 
 # --- CONFIGURATION ---
@@ -22,6 +23,12 @@ GROUND_TRUTH_MAP = {
     "Waveband": "Inst_Waveband"
 }
 
+def extract_numeric(text):
+    if pd.isna(text): return np.nan
+    # Extract first number found (handles "800 km", "0.5m", etc.)
+    match = re.search(r'(\d+(?:\.\d+)?)', str(text).replace(',', ''))
+    return float(match.group(1)) if match else np.nan
+
 def standardize_ceos():
     if not os.path.exists(INPUT_FILE):
         print(f"Error: {INPUT_FILE} not found.")
@@ -41,9 +48,24 @@ def standardize_ceos():
         if col not in df_std.columns:
             df_std[col] = np.nan
 
-    # 3. Clean up specific fields (example: Altitude)
+    # 3. Clean up specific fields
+    # Numerical Extraction (Overwrites existing data as requested)
     if "Sat_Altitude" in df_std.columns:
-        df_std["Sat_Altitude"] = df_std["Sat_Altitude"].astype(str).str.replace(" km", "").str.strip()
+        df_std["Sat_Altitude"] = df_std["Sat_Altitude"].apply(extract_numeric)
+    
+    if "Inst_Resolution" in df_std.columns:
+        df_std["Inst_Resolution"] = df_std["Inst_Resolution"].apply(extract_numeric)
+        
+    if "Inst_Swath" in df_std.columns:
+        df_std["Inst_Swath"] = df_std["Inst_Swath"].apply(extract_numeric)
+    
+    if "Sat_Full_Name" in df_std.columns:
+        # Remove trailing " Mission" (case-insensitive)
+        df_std["Sat_Full_Name"] = df_std["Sat_Full_Name"].astype(str).replace(to_replace=r"(?i)\s+Mission$", value="", regex=True).str.strip()
+        
+    if "Inst_Full_Name" in df_std.columns:
+        # Remove trailing " Instrument" (case-insensitive)
+        df_std["Inst_Full_Name"] = df_std["Inst_Full_Name"].astype(str).replace(to_replace=r"(?i)\s+Instrument$", value="", regex=True).str.strip()
 
     print(f"Standardization complete. (Columns: {len(df_std.columns)})")
     

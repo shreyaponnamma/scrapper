@@ -73,7 +73,8 @@ async def get_mission_details(browser, mission_url):
         details = {}
         h3 = await page.query_selector('h3')
         full_name = (await h3.inner_text()).strip() if h3 else "Unknown"
-        details['Satellite Full Name'] = re.sub(r'\s+Mission$', '', full_name, flags=re.I)
+        # Remove " Mission" if it exists at the end
+        details['Satellite Full Name'] = re.sub(r'\s+Mission$', '', full_name, flags=re.I).strip()
         details['Mission Agencies'] = await extract_field_value(page, 'Mission Agencies')
         details['Mission Status'] = await extract_field_value(page, 'Mission Status')
         details['Launch Date'] = await extract_field_value(page, 'Launch Date')
@@ -103,7 +104,8 @@ async def get_instrument_details(browser, instrument_url):
         details = {}
         h3 = await page.query_selector('h3')
         inst_name = (await h3.inner_text()).strip() if h3 else "Unknown"
-        details['Instrument Full Name'] = re.sub(r'\s+Instrument$', '', inst_name, flags=re.I)
+        # Remove " Instrument" if it exists at the end
+        details['Instrument Full Name'] = re.sub(r'\s+Instrument$', '', inst_name, flags=re.I).strip()
         details['Resolution'] = await extract_field_value(page, 'Resolution')
         details['Swath'] = await extract_field_value(page, 'Swath')
         details['Accuracy'] = await extract_field_value(page, 'Accuracy')
