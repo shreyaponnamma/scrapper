@@ -100,32 +100,55 @@ Output:"""
 
 def merge_records(oscar_part, ceos_part):
     """
-    Merges two records into one, following the trust hierarchy:
-    - Orbit/Altitude: Prefer OSCAR
-    - Resolution: Min value (finest)
-    - Others: Combine
+    Merges two records into one, following a smart trust hierarchy:
+    - Orbit/Altitude: Prefer OSCAR (usually more specific)
+    - Instrument Specs: Prefer the more specific/informative value
+    - Dates: Prefer the most specific string (e.g., full date over year)
+    - Agencies: Combine unique agencies from both sources
     """
-    # 1. Base is all columns from both (outer join style but per-cell logic)
-    # We'll use a dictionary to build the new row
-    new_row = {**oscar_part, **ceos_part}
+    # Start with CEOS as base and update with OSCAR to preserve OSCAR's mode-specific data
+    new_row = ceos_part.copy()
     
-    # 2. Orbital Policy: Prefer OSCAR
-    new_row['Sat_Altitude'] = oscar_part.get('Sat_Altitude', ceos_part.get('Sat_Altitude'))
+    for key, o_val in oscar_part.items():
+        c_val = ceos_part.get(key)
+        
+        # If OSCAR is effectively empty, we keep CEOS's value (which is already in new_row)
+        if pd.isna(o_val) or str(o_val).lower() in ['n/a', 'nan', '']:
+            continue
+            
+        # If CEOS is empty but OSCAR has data, take OSCAR
+        if pd.isna(c_val) or str(c_val).lower() in ['n/a', 'nan', '']:
+            new_row[key] = o_val
+            continue
+            
+        # If both have data, apply field-specific merging
+        if key == 'Sat_Agency':
+            # Combine unique agencies
+            ag_o = [s.strip() for s in str(o_val).split('/') if s.strip()]
+            ag_c = [s.strip() for s in str(c_val).split('/') if s.strip()]
+            combined = list(dict.fromkeys(ag_o + ag_c))
+            new_row[key] = " / ".join(combined)
+            
+        elif key in ['Sat_Launch', 'Sat_EOL']:
+            # Prefer the longer/more specific date string
+            if len(str(o_val)) >= len(str(c_val)):
+                new_row[key] = o_val
+            else:
+                new_row[key] = c_val
+                
+        elif key == 'Sat_Altitude':
+            # Prefer OSCAR for altitude as it's often more precise in their DB
+            new_row[key] = o_val
+            
+        elif key in ['Inst_Resolution', 'Inst_Swath', 'Inst_Accuracy']:
+            # For instrument modes, OSCAR's value is what makes the row unique, so it MUST win
+            new_row[key] = o_val
+            
+        else:
+            # For other fields, OSCAR normally wins as it's the primary driver of the merged row count
+            new_row[key] = o_val
     
-    # 3. Resolution Policy: Min (Finest)
-    # This requires parsing the resolution values which can be complex text
-    # For now, we take the most detailed text if one is N/A
-    o_res = str(oscar_part.get('Inst_Resolution', 'n/a')).lower()
-    c_res = str(ceos_part.get('Inst_Resolution', 'n/a')).lower()
-    
-    if c_res != 'n/a' and o_res == 'n/a':
-        new_row['Inst_Resolution'] = ceos_part['Inst_Resolution']
-    elif o_res != 'n/a' and c_res == 'n/a':
-        new_row['Inst_Resolution'] = oscar_part['Inst_Resolution']
-    
-    # Mark source
     new_row['Merge_Source'] = "OSCAR+CEOS"
-    
     return new_row
 
 def main():
@@ -237,15 +260,21 @@ def main():
     print(f"Final verified satellite pairs: {len(verified_norm_set)}")
 
     print("Executing final data merge...")
-    # Now merge based on verified satellite pairs and instrument similarity
+    # Track which rows have been successfully merged to avoid duplicate source rows
+    oscar_merged_indices = set()
+    ceos_merged_indices = set()
+
     for i, o_row in df_oscar.iterrows():
         o_sat_norm = o_row['norm_sat']
         o_inst_acr = str(o_row['Inst_Acronym']).lower().strip() if pd.notna(o_row['Inst_Acronym']) else ""
         o_inst_full = str(o_row['Inst_Full_Name']).lower().strip() if pd.notna(o_row['Inst_Full_Name']) else ""
         
-        # Find verified counterparts in CEOS
-        candidates = df_ceos[~df_ceos['merged_flag']]
-        for j, c_row in candidates.iterrows():
+        # Try to find a match in ALL CEOS rows (not just unmerged ones)
+        # We calculate a match score to pick the single best CEOS row for this OSCAR mode
+        best_match_j = -1
+        best_match_score = -1
+        
+        for j, c_row in df_ceos.iterrows():
             c_sat_norm = c_row['norm_sat']
             
             if (o_sat_norm, c_sat_norm) in verified_norm_set:
@@ -253,37 +282,48 @@ def main():
                 c_inst_acr = str(c_row['Inst_Acronym']).lower().strip() if pd.notna(c_row['Inst_Acronym']) else ""
                 c_inst_full = str(c_row['Inst_Full_Name']).lower().strip() if pd.notna(c_row['Inst_Full_Name']) else ""
                 
-                # Broad instrument matching logic
-                match = False
-                # 1. Acronym to Acronym
-                if o_inst_acr and c_inst_acr and o_inst_acr == c_inst_acr: match = True
+                # Calculation of instrument match score
+                current_score = 0
+                
+                # 1. Acronym to Acronym (Highest Priority)
+                if o_inst_acr and c_inst_acr and o_inst_acr == c_inst_acr:
+                    current_score = 100
                 # 2. Acronym to Full Name
-                elif o_inst_acr and o_inst_acr in c_inst_full: match = True
-                elif c_inst_acr and c_inst_acr in o_inst_full: match = True
+                elif o_inst_acr and o_inst_acr in c_inst_full:
+                    current_score = 80
+                elif c_inst_acr and c_inst_acr in o_inst_full:
+                    current_score = 80
                 # 3. Fuzzy match on full names
                 elif o_inst_full and c_inst_full:
                     sim = difflib.SequenceMatcher(None, o_inst_full, c_inst_full).ratio()
-                    if sim > 0.8: match = True
+                    if sim > 0.8:
+                        current_score = 60 + (sim * 20)
                 
-                if match:
-                    merged_row = merge_records(o_row.to_dict(), c_row.to_dict())
-                    merged_data.append(merged_row)
-                    df_ceos.at[j, 'merged_flag'] = True
-                    df_oscar.at[i, 'merged_flag'] = True
-                    break
+                if current_score > best_match_score:
+                    best_match_score = current_score
+                    best_match_j = j
+
+        if best_match_j != -1 and best_match_score >= 60:
+            merged_row = merge_records(o_row.to_dict(), df_ceos.iloc[best_match_j].to_dict())
+            merged_data.append(merged_row)
+            oscar_merged_indices.add(i)
+            # We flag this CEOS row as "partially used" to prevent it being added as "CEOS-Only" later
+            ceos_merged_indices.add(best_match_j)
 
     # Final collection: 
     # 1. All OSCAR that didn't match
-    unmatched_oscar = df_oscar[~df_oscar['merged_flag']].to_dict('records')
-    for row in unmatched_oscar:
-        row['Merge_Source'] = "OSCAR-Only"
-        merged_data.append(row)
+    for i, o_row in df_oscar.iterrows():
+        if i not in oscar_merged_indices:
+            row = o_row.to_dict()
+            row['Merge_Source'] = "OSCAR-Only"
+            merged_data.append(row)
 
     # 2. All CEOS that didn't match
-    unmatched_ceos = df_ceos[~df_ceos['merged_flag']].to_dict('records')
-    for row in unmatched_ceos:
-        row['Merge_Source'] = "CEOS-Only"
-        merged_data.append(row)
+    for j, c_row in df_ceos.iterrows():
+        if j not in ceos_merged_indices:
+            row = c_row.to_dict()
+            row['Merge_Source'] = "CEOS-Only"
+            merged_data.append(row)
 
     # 3. Save
     df_merged = pd.DataFrame(merged_data)
@@ -299,9 +339,9 @@ def main():
     df_merged = df_merged[priority_cols + other_cols]
 
     print(f"Merge Complete! Total Records: {len(df_merged)}")
-    print(f"- Matches: {len(merged_data) - len(unmatched_oscar) - len(unmatched_ceos)}")
-    print(f"- OSCAR Only: {len(unmatched_oscar)}")
-    print(f"- CEOS Only: {len(unmatched_ceos)}")
+    print(f"- Matches (including multi-mode): {len(oscar_merged_indices)}")
+    print(f"- OSCAR Only: {len(df_oscar) - len(oscar_merged_indices)}")
+    print(f"- CEOS Only: {len(df_ceos) - len(ceos_merged_indices)}")
 
     df_merged.to_excel(OUTPUT_FILE, index=False)
     print(f"File saved to {OUTPUT_FILE}")
