@@ -12,9 +12,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 # --- CONFIGURATION ---
-INPUT_CEOS = "clean_code/results/ceos_standardized.xlsx"
-INPUT_OSCAR = "clean_code/results/oscar_standardized.xlsx"
-OUTPUT_FILE = "clean_code/results/merged_satellite_data_complete.xlsx"
+INPUT_CEOS = "../results/ceos_standardized.xlsx"
+INPUT_OSCAR = "../results/oscar_standardized.xlsx"
+OUTPUT_FILE = "../results/merged_satellite_data_complete.xlsx"
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "llama3.2:1b"
@@ -259,41 +259,51 @@ def main():
 
     print(f"Final verified satellite pairs: {len(verified_norm_set)}")
 
+    # Create a name unification map to ensure all rows for the same physical satellite 
+    # use the exact same name strings (important for grouping/sorting).
+    # We prioritize CEOS for Full Name and OSCAR for Acronym.
+    unification_map = {} # norm_name -> {'Sat_Full_Name', 'Sat_Acronym'}
+    for o_acr, c_full in verified_matches:
+        entry = {
+            'Sat_Full_Name': c_full,
+            'Sat_Acronym': o_acr
+        }
+        unification_map[normalize_name(o_acr)] = entry
+        unification_map[normalize_name(c_full)] = entry
+
     print("Executing final data merge...")
     # Track which rows have been successfully merged to avoid duplicate source rows
     oscar_merged_indices = set()
     ceos_merged_indices = set()
+    merged_data = []
 
     for i, o_row in df_oscar.iterrows():
         o_sat_norm = o_row['norm_sat']
         o_inst_acr = str(o_row['Inst_Acronym']).lower().strip() if pd.notna(o_row['Inst_Acronym']) else ""
         o_inst_full = str(o_row['Inst_Full_Name']).lower().strip() if pd.notna(o_row['Inst_Full_Name']) else ""
         
-        # Try to find a match in ALL CEOS rows (not just unmerged ones)
-        # We calculate a match score to pick the single best CEOS row for this OSCAR mode
+        # Try to find a match in ALL CEOS rows
         best_match_j = -1
         best_match_score = -1
+        fallback_j = -1 
         
         for j, c_row in df_ceos.iterrows():
             c_sat_norm = c_row['norm_sat']
             
             if (o_sat_norm, c_sat_norm) in verified_norm_set:
-                # Same satellite, check instrument
+                if fallback_j == -1: fallback_j = j
+                
+                # Same satellite, check instrument similarity
                 c_inst_acr = str(c_row['Inst_Acronym']).lower().strip() if pd.notna(c_row['Inst_Acronym']) else ""
                 c_inst_full = str(c_row['Inst_Full_Name']).lower().strip() if pd.notna(c_row['Inst_Full_Name']) else ""
                 
-                # Calculation of instrument match score
                 current_score = 0
-                
-                # 1. Acronym to Acronym (Highest Priority)
                 if o_inst_acr and c_inst_acr and o_inst_acr == c_inst_acr:
                     current_score = 100
-                # 2. Acronym to Full Name
                 elif o_inst_acr and o_inst_acr in c_inst_full:
                     current_score = 80
                 elif c_inst_acr and c_inst_acr in o_inst_full:
                     current_score = 80
-                # 3. Fuzzy match on full names
                 elif o_inst_full and c_inst_full:
                     sim = difflib.SequenceMatcher(None, o_inst_full, c_inst_full).ratio()
                     if sim > 0.8:
@@ -303,12 +313,22 @@ def main():
                     best_match_score = current_score
                     best_match_j = j
 
+        # Final unified names for this satellite if it was matched
+        unified = unification_map.get(o_sat_norm, {'Sat_Full_Name': o_row['Sat_Full_Name'], 'Sat_Acronym': o_row['Sat_Acronym']})
+
+        # If a specific instrument match was found (>60 score)
         if best_match_j != -1 and best_match_score >= 60:
             merged_row = merge_records(o_row.to_dict(), df_ceos.iloc[best_match_j].to_dict())
+            merged_row.update(unified) # Apply unified names
             merged_data.append(merged_row)
             oscar_merged_indices.add(i)
-            # We flag this CEOS row as "partially used" to prevent it being added as "CEOS-Only" later
             ceos_merged_indices.add(best_match_j)
+        # Fallback: Satellite matches but Instrument doesn't (Backfill Mission context only)
+        elif fallback_j != -1:
+            merged_row = merge_records(o_row.to_dict(), df_ceos.iloc[fallback_j].to_dict())
+            merged_row.update(unified) # Apply unified names
+            merged_data.append(merged_row)
+            oscar_merged_indices.add(i)
 
     # Final collection: 
     # 1. All OSCAR that didn't match
@@ -316,6 +336,9 @@ def main():
         if i not in oscar_merged_indices:
             row = o_row.to_dict()
             row['Merge_Source'] = "OSCAR-Only"
+            # Apply unified name if satellite was matched even if this specific instance wasn't (unlikely but safe)
+            unified = unification_map.get(o_row['norm_sat'])
+            if unified: row.update(unified)
             merged_data.append(row)
 
     # 2. All CEOS that didn't match
@@ -323,10 +346,18 @@ def main():
         if j not in ceos_merged_indices:
             row = c_row.to_dict()
             row['Merge_Source'] = "CEOS-Only"
+            # Apply unified name if satellite was matched elsewhere
+            unified = unification_map.get(c_row['norm_sat'])
+            if unified: row.update(unified)
             merged_data.append(row)
 
     # 3. Save
     df_merged = pd.DataFrame(merged_data)
+    
+    # Sort by Satellite Name to keep instruments grouped
+    if 'Sat_Full_Name' in df_merged.columns:
+        df_merged = df_merged.sort_values(by=['Sat_Full_Name', 'Inst_Full_Name'], na_position='last')
+
     
     # Remove internal helper columns before saving
     cols_to_drop = ['merged_flag', 'parsed_launch', 'norm_sat', 'norm_inst']
