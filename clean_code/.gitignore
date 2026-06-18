@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Data
+# Ignore raw data and results except for maybe some samples if needed
+data/raw/*.xlsx
+data/raw/*.json
+data/processed/*.xlsx
+data/final/*.xlsx
+
+# Logs
+*.log
+
+# OS
+.DS_Store

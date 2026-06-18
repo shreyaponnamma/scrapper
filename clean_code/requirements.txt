@@ -3,3 +3,6 @@ openpyxl
 playwright
 python-dateutil
 numpy
+requests
+aiohttp
+
