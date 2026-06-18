@@ -13,9 +13,9 @@ This guide ensures you have everything needed to run the satellite data pipeline
 ## Installation
 
 1.  **Clone/Copy the repository**:
-    Ensure you are in the `sat-scrapper` directory (or the `clean_code` folder if you haven't renamed it yet).
+    Ensure you are in the `sat-scrapper` repository root.
     ```bash
-    cd clean_code  # Or cd sat-scrapper
+    cd sat-scrapper
     ```
 
 2.  **Create a virtual environment**:
@@ -53,4 +53,17 @@ If you want to use the LLM-merge feature:
 **Note on Models**: The default model is `llama3.2:1b` for speed. If you have a dedicated GPU and notice low matching accuracy, you can change the `OLLAMA_MODEL` in `scripts/utils/config.py` to `llama3.2:3b` or `8b`.
 
 ## Running Tests
-(Future: Add test instructions here)
+There is no automated test suite yet. To validate a change, run the pipeline in stages and confirm each output file is created:
+
+```bash
+python main.py --scrape
+python main.py --process
+python main.py --merge
+```
+
+If a stage fails, inspect the console output from that stage first and then check the upstream input files.
+
+## Related Docs
+- [Code Walkthrough](CODE_WALKTHROUGH.md)
+- [Handover Guide](HANDOVER_GUIDE.md)
+- [Data Mapping Guide](DOCUMENTATION.md)

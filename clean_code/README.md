@@ -51,6 +51,8 @@ python main.py --merge
 ## Maintenance
 Documents for future developers:
 - [Data Mapping Guide](DOCUMENTATION.md)
+- [Code Walkthrough](CODE_WALKTHROUGH.md)
+- [Handover Guide](HANDOVER_GUIDE.md)
 - [Setup Guide](SETUP.md)
 
 ---

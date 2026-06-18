@@ -1,4 +1,4 @@
-# Documention & Data Mapping
+# Documentation & Data Mapping
 
 ## Overview
 The goal of this project is to unify satellite mission data from two primary sources:
@@ -46,4 +46,9 @@ The integration process uses a hybrid approach:
 
 ## Legacy Code
 Old versions of scripts, experimental logic, and alternative reformatting attempts are preserved in `scripts/legacy/`. These are not part of the main pipeline but are kept for reference to ensure no logic is lost during the cleanup.
+
+## Related Docs
+- [Code Walkthrough](CODE_WALKTHROUGH.md)
+- [Handover Guide](HANDOVER_GUIDE.md)
+- [Setup Guide](SETUP.md)
 
