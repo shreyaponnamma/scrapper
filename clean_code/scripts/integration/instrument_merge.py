@@ -70,6 +70,10 @@ def parse_date(date_str):
     except:
         return None
 
+def name_similarity(name1, name2):
+    """Returns a rough similarity score between two normalized names."""
+    return difflib.SequenceMatcher(None, name1, name2).ratio()
+
 def ask_llm_verification(o_row, c_row):
     """
     Queries local LLM (Ollama) to verify satellite identity.
@@ -176,13 +180,20 @@ def main():
         for c_sat in unique_c_sats:
             c_name = c_sat['norm_sat']
             c_year = c_sat['parsed_launch'].year if c_sat['parsed_launch'] else None
+            similarity = name_similarity(o_name, c_name)
             
             if o_acr == c_name or o_name == c_name:
                 verified_matches.append((o_sat['Sat_Acronym'], c_sat['Sat_Full_Name']))
                 continue
                 
             if o_year and c_year and abs(o_year - c_year) <= 1:
-                potential_pairs.append((o_sat, c_sat))
+                if similarity >= 0.9:
+                    verified_matches.append((o_sat['Sat_Acronym'], c_sat['Sat_Full_Name']))
+                    continue
+                if similarity >= 0.65:
+                    potential_pairs.append((o_sat, c_sat))
+
+    print(f"Potential satellite pairs to verify: {len(potential_pairs)}")
 
     def check_pair(pair):
         o_sat, c_sat = pair
@@ -195,9 +206,13 @@ def main():
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(check_pair, p): p for p in potential_pairs}
+        completed = 0
         for future in as_completed(futures):
             key, is_match = future.result()
             if is_match: verified_matches.append(key)
+            completed += 1
+            if completed % 25 == 0 or completed == len(potential_pairs):
+                print(f"  LLM verification progress: {completed}/{len(potential_pairs)}")
 
     match_set = set((normalize_name(o), normalize_name(c)) for o, c in verified_matches)
     

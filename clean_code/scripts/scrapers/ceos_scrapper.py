@@ -27,8 +27,27 @@ async def get_mission_links(page):
         list: A list of dictionaries containing mission names, URLs, and IDs.
     """
     print(f"Fetching mission index from {INDEX_URL}...")
-    await page.goto(INDEX_URL, wait_until="networkidle", timeout=90000)
-    await page.wait_for_selector("a[href*='missionID=']", timeout=30000)
+    await page.goto(INDEX_URL, wait_until="domcontentloaded", timeout=90000)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=30000)
+    except Exception:
+        pass
+
+    mission_links = page.locator("a[href*='missionID=']")
+    link_count = await mission_links.count()
+    if link_count == 0:
+        print(f"CEOS mission links not visible yet at {page.url}; waiting briefly for dynamic content...")
+        try:
+            await page.wait_for_timeout(5000)
+        except Exception:
+            pass
+        link_count = await mission_links.count()
+
+    if link_count == 0:
+        title = await page.title()
+        raise RuntimeError(
+            f"Could not find CEOS mission links after loading {page.url} (title: {title!r})."
+        )
     
     links = await page.eval_on_selector_all("a[href*='missionID=']", """
         els => els.map(a => ({
