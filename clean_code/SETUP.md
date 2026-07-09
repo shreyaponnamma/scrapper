@@ -63,6 +63,13 @@ python main.py --merge
 
 If a stage fails, inspect the console output from that stage first and then check the upstream input files.
 
+### Running the Skyrocket Scraper (Auxiliary)
+To run the Skyrocket enrichment scraper independently:
+```bash
+python scripts/scrapers/skyrocket_scraper.py
+```
+This script will fetch new launch information for the target satellite series and merge the updates directly into the final `data/final/instrument_level_merge.xlsx` file.
+
 ## Related Docs
 - [Code Walkthrough](CODE_WALKTHROUGH.md)
 - [Handover Guide](HANDOVER_GUIDE.md)

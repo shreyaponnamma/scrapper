@@ -8,6 +8,7 @@ The project collects satellite and instrument metadata from two sources and turn
 
 - CEOS mission handbook data
 - WMO OSCAR satellite data
+- Skyrocket launch chronicle data (as an auxiliary source for database enrichment)
 
 The workflow is designed to:
 
@@ -23,7 +24,7 @@ The final outputs are intended for spreadsheet analysis and downstream data proc
 The current code is organized as follows:
 
 - `main.py` - CLI entry point that runs the pipeline stages
-- `scripts/scrapers/` - web scrapers for CEOS and WMO OSCAR
+- `scripts/scrapers/` - web scrapers for CEOS, WMO OSCAR, and Skyrocket launch chronicle
 - `scripts/processing/` - standardization scripts that align source data into a shared schema
 - `scripts/integration/` - merge scripts that combine the processed datasets
 - `scripts/utils/` - shared configuration
@@ -38,6 +39,8 @@ The pipeline has four conceptual stages:
 
 ### Stage 1: Scraping
 The scraper scripts fetch data from the upstream source websites and write the raw outputs into `data/raw/`.
+
+*Note: The auxiliary `skyrocket_scraper.py` is a special-purpose scraper that does not output a raw file. Instead, it is designed to run post-integration, scraping target pages and appending new launch data directly to the final `data/final/instrument_level_merge.xlsx` file.*
 
 ### Stage 2: Standardization
 The processing scripts map source-specific column names into a common schema and clean values such as names, dates, and numeric fields.
@@ -128,6 +131,29 @@ Notes:
 - it uses Playwright because the page is dynamically rendered
 - it scrolls through a long table to collect all entries
 - browser installation and system dependencies must be available
+
+### `scripts/scrapers/skyrocket_scraper.py`
+Enriches the final database with recent launch data from space.skyrocket.de.
+
+Inputs:
+
+- space.skyrocket.de launch chronicle page (from `scripts/scrapers/additional_sources.txt` or default URL).
+- existing final spreadsheet `data/final/instrument_level_merge.xlsx`.
+
+Outputs:
+
+- Appends new/missing target satellites directly to `data/final/instrument_level_merge.xlsx`.
+
+What it extracts:
+
+- Satellite names
+- International Designators (COSPAR IDs)
+
+Notes:
+
+- It processes specific target series (defaulting to "ICEYE" and "Elektro").
+- It filters out planned, failed, or TBD launches using date and text heuristic validation.
+- It performs direct duplication checks against existing names, acronyms, and COSPAR IDs in the database before appending new rows.
 
 ### `scripts/processing/standardize_ceos.py`
 Standardizes the raw CEOS export.

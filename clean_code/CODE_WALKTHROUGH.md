@@ -8,6 +8,7 @@ The project collects satellite and instrument data from two external sources:
 
 - CEOS mission handbook data
 - WMO OSCAR satellite data
+- Skyrocket launch chronicle data (as an auxiliary source for database enrichment)
 
 The code then:
 
@@ -31,6 +32,8 @@ The intended execution order is:
 
 The orchestrator in `main.py` can run these steps from the command line.
 
+*Note: `scripts/scrapers/skyrocket_scraper.py` is an auxiliary script that runs independently (not part of the core `main.py` pipeline) to enrich the final merged outputs with recent launch data.*
+
 ## 3. Directory roles
 
 ### `data/raw/`
@@ -43,7 +46,7 @@ Standardized versions of the raw exports. This is where source-specific column n
 Final merged outputs. These are the files a downstream user should consume.
 
 ### `scripts/scrapers/`
-Web scraping logic for the source websites.
+Web scraping logic for the source websites (CEOS, OSCAR, and Skyrocket).
 
 ### `scripts/processing/`
 Normalization and schema-alignment code.
@@ -129,6 +132,27 @@ Important assumptions:
 - the table is dynamically loaded, so the scraper depends on browser automation
 - the site may require scrolling and waiting for data to appear
 - the scraper expects Playwright to be installed correctly
+
+### `scripts/scrapers/skyrocket_scraper.py`
+An auxiliary scraper that pulls recent launch chronicle records from space.skyrocket.de for target satellite series (like ICEYE and Elektro) and merges them directly into the final database.
+
+What it produces:
+
+- Direct updates to the final `data/final/instrument_level_merge.xlsx` database.
+
+Key behavior:
+
+- Reads the start launch page URL from `scripts/scrapers/additional_sources.txt` or falls back to a default launch chronicle URL.
+- Crawls the launch index to find target satellite series.
+- Extracts launched satellite details from the series-specific page (validating COSPAR IDs and filtering out planned or failed launches).
+- Compares scraped satellites against the existing merged database, matching on name or COSPAR ID.
+- Appends new satellites directly to `instrument_level_merge.xlsx` with the `Merge_Source` column set to `'Skyrocket'`.
+
+Important assumptions:
+
+- Requires target series names and start URLs to be structured as expected.
+- Runs as an independent script to enrich the final database.
+
 
 ### `scripts/processing/standardize_ceos.py`
 Converts the CEOS raw export into the shared schema.

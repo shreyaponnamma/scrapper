@@ -4,6 +4,7 @@
 The goal of this project is to unify satellite mission data from two primary sources:
 1.  **CEOS (Committee on Earth Observation Satellites)**: Detailed mission and instrument handbook.
 2.  **WMO OSCAR (Observing Systems Capability Analysis and Review Tool)**: Comprehensive satellite status and observation capabilities.
+3.  **Skyrocket Space Launch Chronicle**: Auxiliary source used to enrich the database with recent satellite launch records (specifically target series like ICEYE and Elektro).
 
 ## Unified Schema
 All sources are transformed into a standard format (often referred to as "Multi-SMU Style") before merging.
@@ -38,6 +39,12 @@ The integration process uses a hybrid approach:
 1.  **Fuzzy Name Matching**: Standardizes names (removing spaces, case-folding) and uses `difflib.SequenceMatcher` to find candidates.
 2.  **Timeline Filtering**: Compares launch and EOL dates to ensure matched satellites are temporal successors or the same unit.
 3.  **LLM Verification**: Highly ambiguous cases are sent to a local LLM (defaults to `llama3.2:1b`) with a prompt to decide if Entity A and Entity B refer to the same satellite or instrument.
+
+Additionally, the **Skyrocket Scraper** uses a direct merge pattern to enrich the final database:
+- It scrapes launched satellites from target series.
+- It validates the COSPAR IDs (filtering out planned, failed, or TBD launches).
+- It checks if the satellite name or COSPAR ID already exists in the merged database (`instrument_level_merge.xlsx`).
+- If not present, it appends the new record directly with `Merge_Source` marked as `'Skyrocket'`.
 
 ## Data Lineage
 - `data/raw/`: Scraped HTML tables saved as Excel/CSV.
